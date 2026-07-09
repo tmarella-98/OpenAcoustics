@@ -16,14 +16,14 @@ driver = Driver(
     le=0.40,
 
     sd=138.0,
-
     xmax=5.5,
-
     bl=7.2,
-
     mms=14.0,
-
-    cms=1.7
+    cms=1.7,
 )
 
-driver.summary()
+driver.save("examples/SB17NBAC35-8.json")
+
+loaded_driver = Driver.load("examples/SB17NBAC35-8.json")
+
+loaded_driver.summary()
