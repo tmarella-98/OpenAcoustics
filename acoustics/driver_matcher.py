@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 from acoustics.driver import Driver
 from acoustics.requirements import Requirements
+from acoustics.requirement_profiles import PROFILES
 
 
 @dataclass
@@ -35,7 +36,7 @@ class MatchResult:
         parameters = list(self.parameter_scores.keys())
         scores = list(self.parameter_scores.values())
 
-        plt.figure(figsize=(9, 4))
+        plt.figure(figsize=(10, 4))
         plt.bar(parameters, scores)
         plt.ylim(0, 100)
         plt.ylabel("Match score (%)")
@@ -52,24 +53,89 @@ class DriverMatcher:
         parameter_scores = {}
         notes = []
 
+        profile = PROFILES.get(requirements.profile)
+
+        if profile is None:
+            raise ValueError(f"Unknown requirement profile: {requirements.profile}")
+
         if requirements.target_f3_hz is not None:
-            parameter_scores["Fs"] = self._score_maximum(driver.fs, requirements.target_f3_hz)
-            parameter_scores["Qts"] = self._score_range(driver.qts, 0.25, 0.50)
-            parameter_scores["Qes"] = self._score_range(driver.qes, 0.25, 0.60)
-            parameter_scores["Vas"] = self._score_vas(driver.vas, requirements.max_box_volume_l)
-            parameter_scores["Sd"] = self._score_minimum(driver.sd, 120.0)
-            parameter_scores["Xmax"] = self._score_minimum(driver.xmax, 5.0)
-            parameter_scores["BL"] = self._score_minimum(driver.bl, 6.0)
+            parameter_scores["Fs"] = self._score_maximum(
+                driver.fs,
+                requirements.target_f3_hz,
+            )
 
             if driver.fs <= requirements.target_f3_hz:
                 notes.append("✓ Fs is suitable for the target bass extension.")
             else:
                 notes.append("✗ Fs is higher than the target F3; bass extension may be limited.")
 
-            if 0.25 <= driver.qts <= 0.50:
-                notes.append("✓ Qts is in a useful range for sealed/vented hi-fi alignments.")
+        if profile.qts_min is not None and profile.qts_max is not None:
+            parameter_scores["Qts"] = self._score_range(
+                driver.qts,
+                profile.qts_min,
+                profile.qts_max,
+            )
+
+            if profile.qts_min <= driver.qts <= profile.qts_max:
+                notes.append("✓ Qts is within the preferred range for this profile.")
             else:
-                notes.append("⚠ Qts is outside the initial preferred range.")
+                notes.append("⚠ Qts is outside the preferred range for this profile.")
+
+        if profile.qes_min is not None and profile.qes_max is not None:
+            parameter_scores["Qes"] = self._score_range(
+                driver.qes,
+                profile.qes_min,
+                profile.qes_max,
+            )
+
+        if profile.fs_max is not None:
+            parameter_scores["Profile Fs"] = self._score_maximum(
+                driver.fs,
+                profile.fs_max,
+            )
+
+        if profile.vas_max is not None:
+            parameter_scores["Vas"] = self._score_maximum(
+                driver.vas,
+                profile.vas_max,
+            )
+
+        if profile.sd_min is not None and profile.sd_max is not None:
+            parameter_scores["Sd"] = self._score_range(
+        driver.sd,
+        profile.sd_min,
+        profile.sd_max,
+    )
+        elif profile.sd_min is not None:
+            parameter_scores["Sd"] = self._score_minimum(
+        driver.sd,
+        profile.sd_min,
+    )
+
+        if profile.xmax_min is not None and profile.xmax_max is not None:
+            parameter_scores["Xmax"] = self._score_range(
+        driver.xmax,
+        profile.xmax_min,
+        profile.xmax_max,
+    )
+        elif profile.xmax_min is not None:
+            parameter_scores["Xmax"] = self._score_minimum(
+        driver.xmax,
+        profile.xmax_min,
+    )
+
+        if profile.bl_min is not None and profile.bl_max is not None:
+             parameter_scores["BL"] = self._score_range(
+        driver.bl,
+        profile.bl_min,
+        profile.bl_max,
+    )
+        elif profile.bl_min is not None:
+            parameter_scores["BL"] = self._score_minimum(
+        driver.bl,
+        profile.bl_min,
+    )
+            
 
         if requirements.nominal_impedance_ohm is not None:
             parameter_scores["Re"] = self._score_impedance(
@@ -79,10 +145,16 @@ class DriverMatcher:
 
         if requirements.max_driver_diameter_mm is not None:
             estimated_diameter_mm = self._estimate_diameter_from_sd(driver.sd)
+
             parameter_scores["Diameter"] = self._score_maximum(
                 estimated_diameter_mm,
                 requirements.max_driver_diameter_mm,
             )
+
+            if estimated_diameter_mm <= requirements.max_driver_diameter_mm:
+                notes.append("✓ Estimated piston diameter fits the size constraint.")
+            else:
+                notes.append("✗ Estimated piston diameter exceeds the size constraint.")
 
         if requirements.target_spl_db is not None:
             notes.append("⚠ SPL matching not implemented yet because Driver has no sensitivity field.")
@@ -132,21 +204,6 @@ class DriverMatcher:
         else:
             score = 100.0 * maximum / value
 
-        return max(0.0, min(100.0, score))
-
-    @staticmethod
-    def _score_vas(vas_l: float, max_box_volume_l: float | None) -> float:
-        if max_box_volume_l is None:
-            return 100.0
-
-        # Rough first-pass heuristic:
-        # For compact boxes, lower Vas is easier to work with.
-        preferred_vas = max_box_volume_l * 4.0
-
-        if vas_l <= preferred_vas:
-            return 100.0
-
-        score = 100.0 * preferred_vas / vas_l
         return max(0.0, min(100.0, score))
 
     @staticmethod

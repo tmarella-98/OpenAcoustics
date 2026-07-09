@@ -5,6 +5,7 @@ from acoustics.requirements import Requirements
 
 requirements = Requirements(
     application="6.5-inch Studio Monitor",
+    profile="microspeaker",
     target_f3_hz=48.0,
     target_spl_db=108.0,
     max_box_volume_l=10.0,
