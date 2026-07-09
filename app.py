@@ -1,21 +1,25 @@
-from acoustics.driver import Driver
 from acoustics.driver_database import DriverDatabase
+from acoustics.driver_matcher import DriverMatcher
+from acoustics.requirements import Requirements
 
+
+requirements = Requirements(
+    application="6.5-inch Studio Monitor",
+    target_f3_hz=48.0,
+    target_spl_db=108.0,
+    max_box_volume_l=10.0,
+    nominal_impedance_ohm=8.0,
+    max_driver_diameter_mm=165.0,
+    max_cost_usd=30.0,
+    max_thd_percent=1.0,
+)
 
 database = DriverDatabase()
+drivers = database.search("SB")
 
-driver = Driver.load("examples/SB17NBAC35-8.json")
-database.add_driver(driver)
+matcher = DriverMatcher()
 
-print("Search results for SB:")
-print("-" * 40)
-
-for result in database.search("SB"):
-    print(f"{result.manufacturer} {result.model}")
-
-print()
-print("Drivers with Fs <= 40 Hz and Sd >= 120 cm²:")
-print("-" * 40)
-
-for result in database.filter_by_specs(fs_max=40, sd_min=120):
-    print(f"{result.manufacturer} {result.model}")
+for driver in drivers:
+    result = matcher.match(driver, requirements)
+    result.summary()
+    result.plot_scores()
