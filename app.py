@@ -1,25 +1,16 @@
-from acoustics.driver import Driver
 from acoustics.driver_library import DriverLibrary
 
 
 library = DriverLibrary()
 
-driver = Driver.load("examples/SB17NBAC35-8.json")
+query = input("Search driver library: ")
 
-saved_path = library.add_driver(driver)
+results = library.search_or_open_web(query)
 
-print(f"Saved driver to: {saved_path}")
+if results:
+    print()
+    print("Local matches:")
+    print("-" * 40)
 
-print()
-print("All drivers in library:")
-print("-" * 40)
-
-for driver in library.load_all():
-    print(f"{driver.manufacturer} {driver.model}")
-
-print()
-print("Search results for 'SB':")
-print("-" * 40)
-
-for driver in library.search("SB"):
-    print(f"{driver.manufacturer} {driver.model}")
+    for driver in results:
+        print(f"{driver.manufacturer} {driver.model}")

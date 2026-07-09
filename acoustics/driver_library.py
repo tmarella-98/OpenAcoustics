@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from acoustics.driver import Driver
+from acoustics.web_search import open_datasheet_search
 
 
 class DriverLibrary:
@@ -16,13 +17,11 @@ class DriverLibrary:
         return self.library_path / manufacturer_folder / model_file
 
     def add_driver(self, driver: Driver) -> Path:
-        """Add or update a driver in the library."""
         path = self._driver_path(driver)
         driver.save(path)
         return path
 
     def load_all(self) -> list[Driver]:
-        """Load all drivers from the library."""
         drivers = []
 
         for file_path in self.library_path.rglob("*.json"):
@@ -34,7 +33,6 @@ class DriverLibrary:
         return drivers
 
     def search(self, query: str) -> list[Driver]:
-        """Search drivers by manufacturer or model."""
         query = query.lower()
         results = []
 
@@ -45,3 +43,14 @@ class DriverLibrary:
                 results.append(driver)
 
         return results
+
+    def search_or_open_web(self, query: str) -> list[Driver]:
+        results = self.search(query)
+
+        if results:
+            return results
+
+        print(f"No local drivers found for: {query}")
+        print("Opening datasheet web search...")
+        open_datasheet_search(query)
+        return []
