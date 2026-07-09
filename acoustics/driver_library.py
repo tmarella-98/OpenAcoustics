@@ -1,0 +1,47 @@
+from pathlib import Path
+
+from acoustics.driver import Driver
+
+
+class DriverLibrary:
+    """Local file-based loudspeaker driver database."""
+
+    def __init__(self, library_path: str = "library/drivers"):
+        self.library_path = Path(library_path)
+        self.library_path.mkdir(parents=True, exist_ok=True)
+
+    def _driver_path(self, driver: Driver) -> Path:
+        manufacturer_folder = driver.manufacturer.strip().replace("/", "-")
+        model_file = driver.model.strip().replace("/", "-") + ".json"
+        return self.library_path / manufacturer_folder / model_file
+
+    def add_driver(self, driver: Driver) -> Path:
+        """Add or update a driver in the library."""
+        path = self._driver_path(driver)
+        driver.save(path)
+        return path
+
+    def load_all(self) -> list[Driver]:
+        """Load all drivers from the library."""
+        drivers = []
+
+        for file_path in self.library_path.rglob("*.json"):
+            try:
+                drivers.append(Driver.load(file_path))
+            except Exception as error:
+                print(f"Could not load {file_path}: {error}")
+
+        return drivers
+
+    def search(self, query: str) -> list[Driver]:
+        """Search drivers by manufacturer or model."""
+        query = query.lower()
+        results = []
+
+        for driver in self.load_all():
+            text = f"{driver.manufacturer} {driver.model}".lower()
+
+            if query in text:
+                results.append(driver)
+
+        return results
