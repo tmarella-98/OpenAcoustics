@@ -1,29 +1,26 @@
 from acoustics.driver import Driver
+from acoustics.project import Project
+from acoustics.requirements import Requirements
 
 
-driver = Driver(
-    manufacturer="SB Acoustics",
-    model="SB17NBAC35-8",
-
-    fs=33.0,
-    qts=0.33,
-    qes=0.36,
-    qms=4.0,
-
-    vas=33.0,
-
-    re=5.8,
-    le=0.40,
-
-    sd=138.0,
-    xmax=5.5,
-    bl=7.2,
-    mms=14.0,
-    cms=1.7,
+requirements = Requirements(
+    application="6.5-inch Studio Monitor",
+    target_f3_hz=48.0,
+    target_spl_db=108.0,
+    max_box_volume_l=10.0,
+    nominal_impedance_ohm=8.0,
+    max_driver_diameter_mm=165.0,
+    max_cost_usd=30.0,
+    max_thd_percent=1.0,
 )
 
-driver.save("examples/SB17NBAC35-8.json")
+project = Project(
+    name="Studio Monitor Concept",
+    requirements=requirements,
+)
 
-loaded_driver = Driver.load("examples/SB17NBAC35-8.json")
+driver = Driver.load("examples/SB17NBAC35-8.json")
 
-loaded_driver.summary()
+project.add_driver(driver)
+
+project.summary()
