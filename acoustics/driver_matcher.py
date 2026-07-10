@@ -13,6 +13,7 @@ class MatchResult:
     overall_score: float
     parameter_scores: dict[str, float]
     notes: list[str]
+    is_compatible: bool
 
     def summary(self) -> None:
         print("=" * 50)
@@ -20,6 +21,9 @@ class MatchResult:
         print("=" * 50)
         print(f"Overall match: {self.overall_score:.1f}%")
         print()
+
+        status = "Compatible" if self.is_compatible else "Incompatible"
+        print(f"Compatibility : {status}")
 
         print("Parameter scores")
         print("-" * 40)
@@ -54,6 +58,9 @@ class DriverMatcher:
         notes = []
 
         profile = PROFILES.get(requirements.profile)
+
+        is_compatible = True
+        score_cap = 100.0
 
         if profile is None:
             raise ValueError(f"Unknown requirement profile: {requirements.profile}")
@@ -165,18 +172,45 @@ class DriverMatcher:
         if requirements.max_cost_usd is not None:
             notes.append("⚠ Cost matching not implemented yet because Driver has no cost field.")
 
-        overall_score = (
-            sum(parameter_scores.values()) / len(parameter_scores)
-            if parameter_scores
-            else 0.0
-        )
+        if profile.sd_max is not None and driver.sd > profile.sd_max * 3.0:
+            is_compatible = False
+            score_cap = min(score_cap, 20.0)
+            notes.append(
+            f"✗ Hard incompatibility: Sd is more than 3× the profile maximum "
+            f"({driver.sd:.2f} cm² vs {profile.sd_max:.2f} cm²)."
+                              )
+
+        if profile.vas_max is not None and driver.vas > profile.vas_max * 10.0:
+         is_compatible = False
+         score_cap = min(score_cap, 20.0)
+         notes.append(
+        f"✗ Hard incompatibility: Vas is more than 10× the profile maximum "
+        f"({driver.vas:.3f} L vs {profile.vas_max:.3f} L)."
+             )
+
+        if profile.bl_max is not None and driver.bl > profile.bl_max * 4.0:
+            is_compatible = False
+            score_cap = min(score_cap, 30.0)
+            notes.append(
+             f"✗ Strong mismatch: BL is far above the expected range "
+             f"({driver.bl:.2f} vs {profile.bl_max:.2f})."
+                    )
+
+        raw_score = (
+    sum(parameter_scores.values()) / len(parameter_scores)
+    if parameter_scores
+    else 0.0
+)
+
+        overall_score = min(raw_score, score_cap)
 
         return MatchResult(
             driver=driver,
             overall_score=overall_score,
             parameter_scores=parameter_scores,
             notes=notes,
-        )
+            is_compatible=is_compatible,
+)
 
     @staticmethod
     def _score_maximum(value: float, target: float) -> float:
