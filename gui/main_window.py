@@ -1,8 +1,11 @@
 import numpy as np
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QFileDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -11,14 +14,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from acoustics.csv_driver_importer import CsvDriverImporter
 from acoustics.driver import Driver
 from acoustics.driver_database import DriverDatabase
 from acoustics.sealed_box import SealedBox
-from gui.mpl_canvas import MplCanvas
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QDialog
-
 from gui.add_driver_dialog import AddDriverDialog
+from gui.mpl_canvas import MplCanvas
+
 
 class MainWindow(QMainWindow):
     """Main OpenAcoustics application window."""
@@ -28,7 +30,6 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("OpenAcoustics")
         self.resize(1200, 800)
-        self.create_menu()
 
         self.database = DriverDatabase()
         self.drivers: list[Driver] = self.database.load_all()
@@ -39,15 +40,39 @@ class MainWindow(QMainWindow):
             1000,
         )
 
+        self.create_menu()
+        self.create_widgets()
+        self.create_layout()
+        self.connect_signals()
+        self.reload_driver_selector()
+
+    def create_menu(self) -> None:
+        """Create the application menu bar."""
+        driver_menu = self.menuBar().addMenu("Driver")
+
+        add_driver_action = QAction(
+            "Add Driver",
+            self,
+        )
+        add_driver_action.triggered.connect(
+            self.open_add_driver_dialog
+        )
+
+        import_csv_action = QAction(
+            "Import Drivers from CSV",
+            self,
+        )
+        import_csv_action.triggered.connect(
+            self.import_drivers_from_csv
+        )
+
+        driver_menu.addAction(add_driver_action)
+        driver_menu.addAction(import_csv_action)
+
+    def create_widgets(self) -> None:
+        """Create the widgets used by the main window."""
         self.driver_selector_label = QLabel("Driver")
-
         self.driver_selector = QComboBox()
-
-        for driver in self.drivers:
-            display_name = (
-                f"{driver.manufacturer} {driver.model}"
-            )
-            self.driver_selector.addItem(display_name)
 
         self.volume_label = QLabel("Box volume: 10.0 L")
         self.fc_label = QLabel("Fc: --")
@@ -66,7 +91,10 @@ class MainWindow(QMainWindow):
 
         self.canvas = MplCanvas()
 
+    def create_layout(self) -> None:
+        """Create and assign the central window layout."""
         layout = QVBoxLayout()
+
         layout.addWidget(self.driver_selector_label)
         layout.addWidget(self.driver_selector)
         layout.addWidget(self.volume_label)
@@ -81,6 +109,8 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central_widget)
 
+    def connect_signals(self) -> None:
+        """Connect GUI events to their handler methods."""
         self.volume_slider.valueChanged.connect(
             self.update_simulation
         )
@@ -89,13 +119,8 @@ class MainWindow(QMainWindow):
             self.update_simulation
         )
 
-        if self.drivers:
-            self.update_simulation()
-        else:
-            self.show_empty_database_message()
-
     def get_selected_driver(self) -> Driver | None:
-        """Return the driver selected in the combo box."""
+        """Return the driver currently selected in the combo box."""
         selected_index = self.driver_selector.currentIndex()
 
         if selected_index < 0:
@@ -115,16 +140,129 @@ class MainWindow(QMainWindow):
         self.qtc_label.setText("Qtc: no driver")
         self.f3_label.setText("F3: no driver")
 
+        self.canvas.axes.clear()
+        self.canvas.axes.set_title(
+            "No driver selected"
+        )
+        self.canvas.draw_idle()
+
         QMessageBox.information(
             self,
             "Driver database empty",
             (
                 "No drivers were found in the OpenAcoustics "
                 "database.\n\n"
-                "Add at least one driver before running "
-                "the simulation."
+                "Use Driver → Add Driver or "
+                "Driver → Import Drivers from CSV."
             ),
         )
+
+    def open_add_driver_dialog(self) -> None:
+        """Open the manual driver-entry dialog."""
+        dialog = AddDriverDialog(self)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        driver = dialog.get_driver()
+        self.database.add_driver(driver)
+
+        self.reload_driver_selector(
+            selected_manufacturer=driver.manufacturer,
+            selected_model=driver.model,
+        )
+
+    def import_drivers_from_csv(self) -> None:
+        """Select a CSV file and import its drivers."""
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Import Driver CSV",
+            "",
+            "CSV files (*.csv);;All files (*.*)",
+        )
+
+        if not file_path:
+            return
+
+        importer = CsvDriverImporter(
+            database=self.database
+        )
+
+        try:
+            result = importer.import_file(file_path)
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "CSV import failed",
+                str(error),
+            )
+            return
+
+        self.reload_driver_selector()
+
+        message = (
+            f"Imported: {result.imported_count}\n"
+            f"Failed: {result.failed_count}"
+        )
+
+        if result.errors:
+            error_preview = "\n".join(
+                result.errors[:10]
+            )
+
+            message += (
+                "\n\nErrors:\n"
+                f"{error_preview}"
+            )
+
+            if len(result.errors) > 10:
+                remaining = len(result.errors) - 10
+                message += (
+                    f"\n...and {remaining} more errors."
+                )
+
+        QMessageBox.information(
+            self,
+            "CSV import complete",
+            message,
+        )
+
+    def reload_driver_selector(
+        self,
+        selected_manufacturer: str | None = None,
+        selected_model: str | None = None,
+    ) -> None:
+        """Reload the driver selector from the SQLite database."""
+        self.drivers = self.database.load_all()
+
+        self.driver_selector.blockSignals(True)
+        self.driver_selector.clear()
+
+        selected_index = 0
+
+        for index, driver in enumerate(self.drivers):
+            display_name = (
+                f"{driver.manufacturer} {driver.model}"
+            )
+            self.driver_selector.addItem(display_name)
+
+            if (
+                driver.manufacturer == selected_manufacturer
+                and driver.model == selected_model
+            ):
+                selected_index = index
+
+        self.driver_selector.blockSignals(False)
+
+        if not self.drivers:
+            self.show_empty_database_message()
+            return
+
+        self.driver_selector.setEnabled(True)
+        self.volume_slider.setEnabled(True)
+        self.driver_selector.setCurrentIndex(selected_index)
+        self.update_simulation()
 
     def update_simulation(self, *_args) -> None:
         """Recalculate and redraw the selected driver simulation."""
@@ -135,17 +273,26 @@ class MainWindow(QMainWindow):
 
         volume_l = self.volume_slider.value() / 10.0
 
-        simulation = SealedBox(
-            driver=driver,
-            volume_l=volume_l,
-        )
-        simulation.calculate()
-
-        magnitude_db = (
-            simulation.calculate_transfer_function(
-                self.frequencies_hz
+        try:
+            simulation = SealedBox(
+                driver=driver,
+                volume_l=volume_l,
             )
-        )
+            simulation.calculate()
+
+            magnitude_db = (
+                simulation.calculate_transfer_function(
+                    self.frequencies_hz
+                )
+            )
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Simulation error",
+                str(error),
+            )
+            return
 
         self.volume_label.setText(
             f"Box volume: {volume_l:.1f} L"
@@ -218,60 +365,3 @@ class MainWindow(QMainWindow):
 
         self.canvas.figure.tight_layout()
         self.canvas.draw_idle()
-
-    def create_menu(self) -> None:
-            """Create the application menu bar."""
-            driver_menu = self.menuBar().addMenu("Driver")
-
-            add_driver_action = QAction("Add Driver", self)
-            add_driver_action.triggered.connect(self.open_add_driver_dialog)
-
-            driver_menu.addAction(add_driver_action)
-
-
-    def open_add_driver_dialog(self) -> None:
-        """Open the manual driver-entry dialog."""
-        dialog = AddDriverDialog(self)
-
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        driver = dialog.get_driver()
-        self.database.add_driver(driver)
-
-        self.reload_driver_selector(
-            selected_manufacturer=driver.manufacturer,
-            selected_model=driver.model,
-    )
-
-
-def reload_driver_selector(
-    self,
-    selected_manufacturer: str | None = None,
-    selected_model: str | None = None,
-) -> None:
-    """Reload the driver selector from the SQLite database."""
-    self.drivers = self.database.load_all()
-
-    self.driver_selector.blockSignals(True)
-    self.driver_selector.clear()
-
-    selected_index = 0
-
-    for index, driver in enumerate(self.drivers):
-        display_name = f"{driver.manufacturer} {driver.model}"
-        self.driver_selector.addItem(display_name)
-
-        if (
-            driver.manufacturer == selected_manufacturer
-            and driver.model == selected_model
-        ):
-            selected_index = index
-
-    self.driver_selector.blockSignals(False)
-
-    if self.drivers:
-        self.driver_selector.setEnabled(True)
-        self.volume_slider.setEnabled(True)
-        self.driver_selector.setCurrentIndex(selected_index)
-        self.update_simulation()
