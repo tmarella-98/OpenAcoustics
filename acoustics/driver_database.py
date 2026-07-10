@@ -137,7 +137,20 @@ class DriverDatabase:
             ).fetchall()
 
         return [self._row_to_driver(row) for row in rows]
+    def load_all(self) -> list[Driver]:
+     """Load every driver stored in the database."""
+     with self._connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT manufacturer, model,
+                   fs, qts, qes, qms,
+                   vas, re, le, sd, xmax, bl, mms, cms
+            FROM drivers
+            ORDER BY manufacturer, model
+            """
+        ).fetchall()
 
+        return [self._row_to_driver(row) for row in rows]
     @staticmethod
     def _row_to_driver(row) -> Driver:
         return Driver(
