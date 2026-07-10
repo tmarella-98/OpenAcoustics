@@ -1,10 +1,10 @@
 from acoustics.driver import Driver
-from acoustics.sealed_box import SealedBox
+from plots.sealed_box_plot import plot_volume_slider
 
 
 driver = Driver.load("examples/SB17NBAC35-8.json")
 
-SealedBox.plot_volume_slider(
+plot_volume_slider(
     driver=driver,
     initial_volume_l=10.0,
     minimum_volume_l=2.0,
