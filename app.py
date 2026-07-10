@@ -4,11 +4,10 @@ from acoustics.sealed_box import SealedBox
 
 driver = Driver.load("examples/SB17NBAC35-8.json")
 
-simulation = SealedBox(
+SealedBox.plot_volume_slider(
     driver=driver,
-    volume_l=10.0,
+    initial_volume_l=10.0,
+    minimum_volume_l=2.0,
+    maximum_volume_l=40.0,
+    volume_step_l=0.1,
 )
-
-simulation.calculate()
-simulation.summary()
-simulation.plot_transfer_function()
