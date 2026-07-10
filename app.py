@@ -11,3 +11,4 @@ simulation = SealedBox(
 
 simulation.calculate()
 simulation.summary()
+simulation.plot_transfer_function()
