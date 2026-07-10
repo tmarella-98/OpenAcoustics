@@ -15,7 +15,10 @@ from acoustics.driver import Driver
 from acoustics.driver_database import DriverDatabase
 from acoustics.sealed_box import SealedBox
 from gui.mpl_canvas import MplCanvas
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QDialog
 
+from gui.add_driver_dialog import AddDriverDialog
 
 class MainWindow(QMainWindow):
     """Main OpenAcoustics application window."""
@@ -25,6 +28,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("OpenAcoustics")
         self.resize(1200, 800)
+        self.create_menu()
 
         self.database = DriverDatabase()
         self.drivers: list[Driver] = self.database.load_all()
@@ -214,3 +218,60 @@ class MainWindow(QMainWindow):
 
         self.canvas.figure.tight_layout()
         self.canvas.draw_idle()
+
+    def create_menu(self) -> None:
+            """Create the application menu bar."""
+            driver_menu = self.menuBar().addMenu("Driver")
+
+            add_driver_action = QAction("Add Driver", self)
+            add_driver_action.triggered.connect(self.open_add_driver_dialog)
+
+            driver_menu.addAction(add_driver_action)
+
+
+    def open_add_driver_dialog(self) -> None:
+        """Open the manual driver-entry dialog."""
+        dialog = AddDriverDialog(self)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        driver = dialog.get_driver()
+        self.database.add_driver(driver)
+
+        self.reload_driver_selector(
+            selected_manufacturer=driver.manufacturer,
+            selected_model=driver.model,
+    )
+
+
+def reload_driver_selector(
+    self,
+    selected_manufacturer: str | None = None,
+    selected_model: str | None = None,
+) -> None:
+    """Reload the driver selector from the SQLite database."""
+    self.drivers = self.database.load_all()
+
+    self.driver_selector.blockSignals(True)
+    self.driver_selector.clear()
+
+    selected_index = 0
+
+    for index, driver in enumerate(self.drivers):
+        display_name = f"{driver.manufacturer} {driver.model}"
+        self.driver_selector.addItem(display_name)
+
+        if (
+            driver.manufacturer == selected_manufacturer
+            and driver.model == selected_model
+        ):
+            selected_index = index
+
+    self.driver_selector.blockSignals(False)
+
+    if self.drivers:
+        self.driver_selector.setEnabled(True)
+        self.volume_slider.setEnabled(True)
+        self.driver_selector.setCurrentIndex(selected_index)
+        self.update_simulation()
