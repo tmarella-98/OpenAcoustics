@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from acoustics.driver import Driver
+from core.enclosures.base import Enclosure
+from core.enclosures.bass_reflex import BassReflexEnclosure
+from core.enclosures.sealed import SealedEnclosure
 
 
-PROJECT_FORMAT_VERSION = 1
+PROJECT_FORMAT_VERSION = 2
 
 
 @dataclass
@@ -15,16 +18,9 @@ class Project:
     """Represents one OpenAcoustics engineering project."""
 
     name: str
-
     driver: Driver | None = None
-
-    enclosure_type: str | None = None
-    enclosure_parameters: dict[str, float] = field(
-        default_factory=dict
-    )
-
+    enclosure: Enclosure | None = None
     notes: str = ""
-
     format_version: int = PROJECT_FORMAT_VERSION
 
     def set_driver(self, driver: Driver) -> None:
@@ -32,44 +28,76 @@ class Project:
         self.driver = driver
 
     def clear_driver(self) -> None:
-        """Remove the currently selected driver."""
+        """Remove the selected driver."""
         self.driver = None
 
-    def set_sealed_box(self, volume_l: float) -> None:
-        """Configure a sealed enclosure for the project."""
-        if volume_l <= 0:
-            raise ValueError(
-                "Sealed-box volume must be greater than zero."
-            )
+    def set_enclosure(
+        self,
+        enclosure: Enclosure,
+    ) -> None:
+        """Assign an enclosure definition to the project."""
+        self.enclosure = enclosure
 
-        self.enclosure_type = "sealed"
-        self.enclosure_parameters = {
-            "volume_l": volume_l,
-        }
+    def set_sealed_enclosure(
+        self,
+        volume_l: float,
+    ) -> None:
+        """Assign a sealed enclosure to the project."""
+        self.enclosure = SealedEnclosure(
+            volume_l=volume_l
+        )
+
+    def set_bass_reflex_enclosure(
+        self,
+        volume_l: float,
+        tuning_hz: float,
+        port_diameter_mm: float,
+        port_count: int = 1,
+        port_length_mm: float | None = None,
+    ) -> None:
+        """Assign a bass-reflex enclosure to the project."""
+        self.enclosure = BassReflexEnclosure(
+            volume_l=volume_l,
+            tuning_hz=tuning_hz,
+            port_diameter_mm=port_diameter_mm,
+            port_count=port_count,
+            port_length_mm=port_length_mm,
+        )
 
     def clear_enclosure(self) -> None:
-        """Remove the current enclosure configuration."""
-        self.enclosure_type = None
-        self.enclosure_parameters = {}
+        """Remove the enclosure definition."""
+        self.enclosure = None
 
     def to_dict(self) -> dict:
         """Convert the project into JSON-compatible data."""
-        project_data = asdict(self)
-
-        if self.driver is not None:
-            project_data["driver"] = self.driver.to_dict()
-
-        return project_data
+        return {
+            "format_version": self.format_version,
+            "name": self.name,
+            "driver": (
+                self.driver.to_dict()
+                if self.driver is not None
+                else None
+            ),
+            "enclosure": (
+                self.enclosure.to_dict()
+                if self.enclosure is not None
+                else None
+            ),
+            "notes": self.notes,
+        }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Project":
+    def from_dict(
+        cls,
+        data: dict,
+    ) -> "Project":
         """Create a Project from dictionary data."""
         format_version = data.get(
             "format_version",
-            PROJECT_FORMAT_VERSION,
+            1,
         )
 
-        if format_version != PROJECT_FORMAT_VERSION:
+        if format_version not in {1, 2}:
             raise ValueError(
                 "Unsupported project format version: "
                 f"{format_version}"
@@ -83,19 +111,77 @@ class Project:
             else None
         )
 
+        if format_version == 1:
+            enclosure = cls._load_version_one_enclosure(
+                data
+            )
+        else:
+            enclosure = cls._load_enclosure(
+                data.get("enclosure")
+            )
+
         return cls(
             name=data["name"],
             driver=driver,
-            enclosure_type=data.get("enclosure_type"),
-            enclosure_parameters=data.get(
-                "enclosure_parameters",
-                {},
-            ),
+            enclosure=enclosure,
             notes=data.get("notes", ""),
-            format_version=format_version,
+            format_version=PROJECT_FORMAT_VERSION,
         )
 
-    def save(self, file_path: str | Path) -> None:
+    @staticmethod
+    def _load_version_one_enclosure(
+        data: dict,
+    ) -> Enclosure | None:
+        """Migrate the original project enclosure format."""
+        enclosure_type = data.get(
+            "enclosure_type"
+        )
+
+        parameters = data.get(
+            "enclosure_parameters",
+            {},
+        )
+
+        if enclosure_type is None:
+            return None
+
+        if enclosure_type == "sealed":
+            return SealedEnclosure(
+                volume_l=float(
+                    parameters["volume_l"]
+                )
+            )
+
+        raise ValueError(
+            "Unsupported version-one enclosure type: "
+            f"{enclosure_type}"
+        )
+
+    @staticmethod
+    def _load_enclosure(
+        data: dict | None,
+    ) -> Enclosure | None:
+        """Create the correct enclosure object from project data."""
+        if data is None:
+            return None
+
+        enclosure_type = data.get("type")
+
+        if enclosure_type == "sealed":
+            return SealedEnclosure.from_dict(data)
+
+        if enclosure_type == "bass_reflex":
+            return BassReflexEnclosure.from_dict(data)
+
+        raise ValueError(
+            "Unsupported enclosure type: "
+            f"{enclosure_type}"
+        )
+
+    def save(
+        self,
+        file_path: str | Path,
+    ) -> None:
         """Save the project to an OpenAcoustics project file."""
         file_path = Path(file_path)
 
@@ -150,16 +236,44 @@ class Project:
                 f"{self.driver.model}"
             )
 
-        print(
-            f"Enclosure type: "
-            f"{self.enclosure_type or 'None'}"
-        )
+        if self.enclosure is None:
+            print("Enclosure: None")
 
-        if self.enclosure_parameters:
-            print("Enclosure parameters:")
+        elif isinstance(
+            self.enclosure,
+            SealedEnclosure,
+        ):
+            print("Enclosure: Sealed")
+            print(
+                f"Volume: "
+                f"{self.enclosure.volume_l:.2f} L"
+            )
 
-            for name, value in self.enclosure_parameters.items():
-                print(f"  {name}: {value}")
+        elif isinstance(
+            self.enclosure,
+            BassReflexEnclosure,
+        ):
+            print("Enclosure: Bass reflex")
+            print(
+                f"Volume: "
+                f"{self.enclosure.volume_l:.2f} L"
+            )
+            print(
+                f"Tuning: "
+                f"{self.enclosure.tuning_hz:.2f} Hz"
+            )
+            print(
+                f"Port diameter: "
+                f"{self.enclosure.port_diameter_mm:.2f} mm"
+            )
+            print(
+                f"Port count: "
+                f"{self.enclosure.port_count}"
+            )
+            print(
+                f"Port length: "
+                f"{self.enclosure.port_length_mm}"
+            )
 
         if self.notes:
             print(f"Notes: {self.notes}")
