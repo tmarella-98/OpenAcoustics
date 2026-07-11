@@ -30,6 +30,15 @@ class SealedBox(Simulation):
                 "Sealed-box volume must be greater than zero litres."
             )
 
+        if self.driver.fs is None:
+            raise ValueError("Cannot simulate sealed box: Fs is missing.")
+
+        if self.driver.qts is None:
+            raise ValueError("Cannot simulate sealed box: Qts is missing.")
+
+        if self.driver.vas is None:
+            raise ValueError("Cannot simulate sealed box: Vas is missing.")
+
         if self.driver.fs <= 0:
             raise ValueError("Driver Fs must be greater than zero.")
 

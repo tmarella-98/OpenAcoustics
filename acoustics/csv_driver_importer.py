@@ -26,13 +26,15 @@ REQUIRED_COLUMNS = {
 
 @dataclass
 class CsvImportResult:
+    """Summary of a completed CSV import."""
+
     imported_count: int
     failed_count: int
     errors: list[str]
 
 
 class CsvDriverImporter:
-    """Import loudspeaker driver data from CSV into SQLite."""
+    """Import loudspeaker driver records from CSV into SQLite."""
 
     def __init__(self, database: DriverDatabase) -> None:
         self.database = database
@@ -41,11 +43,22 @@ class CsvDriverImporter:
         self,
         file_path: str | Path,
     ) -> CsvImportResult:
+        """
+        Import all valid rows from a CSV file.
+
+        Missing numerical cells are stored as None, which SQLite stores
+        as NULL. Invalid rows are skipped and reported in the result.
+        """
         file_path = Path(file_path)
 
         if not file_path.exists():
             raise FileNotFoundError(
                 f"CSV file does not exist: {file_path}"
+            )
+
+        if not file_path.is_file():
+            raise ValueError(
+                f"CSV path is not a file: {file_path}"
             )
 
         imported_count = 0
@@ -89,15 +102,11 @@ class CsvDriverImporter:
                 start=2,
             ):
                 try:
-                    normalized_row = {
-                        str(key).strip().lower(): (
-                            value.strip()
-                            if isinstance(value, str)
-                            else value
-                        )
-                        for key, value in row.items()
-                        if key is not None
-                    }
+                    normalized_row = self._normalize_row(row)
+
+                    # Ignore fully blank lines.
+                    if not any(normalized_row.values()):
+                        continue
 
                     driver = self._row_to_driver(
                         normalized_row
@@ -119,11 +128,41 @@ class CsvDriverImporter:
         )
 
     @staticmethod
+    def _normalize_row(
+        row: dict[str, str | None],
+    ) -> dict[str, str]:
+        """Normalize CSV column names and strip cell whitespace."""
+        normalized_row: dict[str, str] = {}
+
+        for key, value in row.items():
+            if key is None:
+                continue
+
+            normalized_key = key.strip().lower()
+
+            if value is None:
+                normalized_value = ""
+            else:
+                normalized_value = value.strip()
+
+            normalized_row[normalized_key] = normalized_value
+
+        return normalized_row
+
+    @staticmethod
     def _row_to_driver(
         row: dict[str, str],
     ) -> Driver:
-        manufacturer = row["manufacturer"].strip()
-        model = row["model"].strip()
+        """Convert one normalized CSV row into a Driver."""
+        manufacturer = row.get(
+            "manufacturer",
+            "",
+        ).strip()
+
+        model = row.get(
+            "model",
+            "",
+        ).strip()
 
         if not manufacturer:
             raise ValueError(
@@ -138,105 +177,93 @@ class CsvDriverImporter:
         return Driver(
             manufacturer=manufacturer,
             model=model,
-            fs=CsvDriverImporter._positive_float(
-                row["fs"],
+            fs=CsvDriverImporter._optional_float(
+                row.get("fs"),
                 "Fs",
             ),
-            qts=CsvDriverImporter._positive_float(
-                row["qts"],
+            qts=CsvDriverImporter._optional_float(
+                row.get("qts"),
                 "Qts",
             ),
-            qes=CsvDriverImporter._positive_float(
-                row["qes"],
+            qes=CsvDriverImporter._optional_float(
+                row.get("qes"),
                 "Qes",
             ),
-            qms=CsvDriverImporter._positive_float(
-                row["qms"],
+            qms=CsvDriverImporter._optional_float(
+                row.get("qms"),
                 "Qms",
             ),
-            vas=CsvDriverImporter._positive_float(
-                row["vas"],
+            vas=CsvDriverImporter._optional_float(
+                row.get("vas"),
                 "Vas",
             ),
-            re=CsvDriverImporter._positive_float(
-                row["re"],
+            re=CsvDriverImporter._optional_float(
+                row.get("re"),
                 "Re",
             ),
-            le=CsvDriverImporter._non_negative_float(
-                row["le"],
+            le=CsvDriverImporter._optional_float(
+                row.get("le"),
                 "Le",
+                allow_zero=True,
             ),
-            sd=CsvDriverImporter._positive_float(
-                row["sd"],
+            sd=CsvDriverImporter._optional_float(
+                row.get("sd"),
                 "Sd",
             ),
-            xmax=CsvDriverImporter._non_negative_float(
-                row["xmax"],
+            xmax=CsvDriverImporter._optional_float(
+                row.get("xmax"),
                 "Xmax",
+                allow_zero=True,
             ),
-            bl=CsvDriverImporter._non_negative_float(
-                row["bl"],
+            bl=CsvDriverImporter._optional_float(
+                row.get("bl"),
                 "BL",
+                allow_zero=True,
             ),
-            mms=CsvDriverImporter._positive_float(
-                row["mms"],
+            mms=CsvDriverImporter._optional_float(
+                row.get("mms"),
                 "Mms",
             ),
-            cms=CsvDriverImporter._positive_float(
-                row["cms"],
+            cms=CsvDriverImporter._optional_float(
+                row.get("cms"),
                 "Cms",
             ),
         )
 
     @staticmethod
-    def _positive_float(
-        value: str,
+    def _optional_float(
+        value: str | None,
         field_name: str,
-    ) -> float:
-        number = CsvDriverImporter._parse_float(
-            value,
-            field_name,
-        )
+        allow_zero: bool = False,
+    ) -> float | None:
+        """
+        Parse an optional numerical field.
 
-        if number <= 0:
-            raise ValueError(
-                f"{field_name} must be greater than zero."
-            )
-
-        return number
-
-    @staticmethod
-    def _non_negative_float(
-        value: str,
-        field_name: str,
-    ) -> float:
-        number = CsvDriverImporter._parse_float(
-            value,
-            field_name,
-        )
-
-        if number < 0:
-            raise ValueError(
-                f"{field_name} cannot be negative."
-            )
-
-        return number
-
-    @staticmethod
-    def _parse_float(
-        value: str,
-        field_name: str,
-    ) -> float:
+        Blank values return None. Non-blank values must be valid numbers.
+        """
         if value is None or not str(value).strip():
-            raise ValueError(
-                f"{field_name} is missing."
-            )
+            return None
+
+        cleaned_value = str(value).strip()
 
         try:
-            return float(value)
+            number = float(cleaned_value)
 
         except ValueError as error:
             raise ValueError(
                 f"{field_name} must be numeric, "
                 f"got '{value}'."
             ) from error
+
+        if allow_zero:
+            if number < 0:
+                raise ValueError(
+                    f"{field_name} cannot be negative."
+                )
+
+        elif number <= 0:
+            raise ValueError(
+                f"{field_name} must be greater than zero."
+            )
+
+        return number

@@ -2,6 +2,7 @@ import math
 import numpy as np
 from acoustics.driver import Driver
 from acoustics.sealed_box import SealedBox
+import pytest
 
 
 def test_sealed_box_fc_and_qtc() -> None:
@@ -103,3 +104,34 @@ def test_transfer_function_is_minus_three_db_at_f3() -> None:
         -3.0103,
         abs_tol=0.01,
     )
+def test_driver_can_store_missing_parameters() -> None:
+    driver = Driver(
+        manufacturer="Test Audio",
+        model="Incomplete Tweeter",
+        fs=900.0,
+        re=5.8,
+    )
+
+    assert driver.fs == 900.0
+    assert driver.qts is None
+    assert driver.vas is None
+
+
+
+def test_sealed_box_rejects_missing_vas() -> None:
+    driver = Driver(
+        manufacturer="Test Audio",
+        model="Incomplete Driver",
+        fs=40.0,
+        qts=0.4,
+        vas=None,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Vas is missing",
+    ):
+        SealedBox(
+            driver=driver,
+            volume_l=10.0,
+        )
