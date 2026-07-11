@@ -17,13 +17,19 @@ from PySide6.QtWidgets import (
 
 from acoustics.driver import Driver
 from acoustics.driver_database import DriverDatabase
-
+from core.project import Project
 
 class DriverExplorer(QWidget):
     """Browse drivers and inspect their stored parameters."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        project: Project,
+    ):
         super().__init__()
+
+        self.project = project
+        
 
         self.database = DriverDatabase()
         self.drivers: list[Driver] = []

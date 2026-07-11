@@ -1,13 +1,16 @@
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QFileDialog,
+    QInputDialog,
     QMainWindow,
     QMessageBox,
 )
 
 from acoustics.csv_driver_importer import CsvDriverImporter
 from acoustics.driver_database import DriverDatabase
+from core.project import Project
 from gui.add_driver_dialog import AddDriverDialog
 from gui.driver_explorer import DriverExplorer
 
@@ -18,17 +21,77 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
 
-        self.setWindowTitle("OpenAcoustics")
-        self.resize(1200, 800)
+        self.project = Project(
+            name="Untitled Project"
+        )
 
+        self.project_file_path: str | None = None
         self.database = DriverDatabase()
+
+        self.resize(1200, 800)
 
         self.create_menu()
         self.create_driver_explorer()
+        self.update_window_title()
 
     def create_menu(self) -> None:
         """Create the application menu bar."""
+        file_menu = self.menuBar().addMenu("File")
         driver_menu = self.menuBar().addMenu("Driver")
+
+        new_project_action = QAction(
+            "New Project",
+            self,
+        )
+        new_project_action.setShortcut("Ctrl+N")
+        new_project_action.triggered.connect(
+            self.new_project
+        )
+
+        open_project_action = QAction(
+            "Open Project...",
+            self,
+        )
+        open_project_action.setShortcut("Ctrl+O")
+        open_project_action.triggered.connect(
+            self.open_project
+        )
+
+        save_project_action = QAction(
+            "Save Project",
+            self,
+        )
+        save_project_action.setShortcut("Ctrl+S")
+        save_project_action.triggered.connect(
+            self.save_project
+        )
+
+        save_project_as_action = QAction(
+            "Save Project As...",
+            self,
+        )
+        save_project_as_action.setShortcut(
+            "Ctrl+Shift+S"
+        )
+        save_project_as_action.triggered.connect(
+            self.save_project_as
+        )
+
+        exit_action = QAction(
+            "Exit",
+            self,
+        )
+        exit_action.triggered.connect(
+            self.close
+        )
+
+        file_menu.addAction(new_project_action)
+        file_menu.addAction(open_project_action)
+        file_menu.addSeparator()
+        file_menu.addAction(save_project_action)
+        file_menu.addAction(save_project_as_action)
+        file_menu.addSeparator()
+        file_menu.addAction(exit_action)
 
         add_driver_action = QAction(
             "Add Driver",
@@ -51,11 +114,145 @@ class MainWindow(QMainWindow):
 
     def create_driver_explorer(self) -> None:
         """Create and display the Driver Explorer."""
-        self.driver_explorer = DriverExplorer()
+        self.driver_explorer = DriverExplorer(
+            project=self.project
+        )
 
         self.setCentralWidget(
             self.driver_explorer
         )
+
+    def new_project(self) -> None:
+        """Create a new empty project."""
+        project_name, accepted = (
+            QInputDialog.getText(
+                self,
+                "New Project",
+                "Project name:",
+                text="Untitled Project",
+            )
+        )
+
+        if not accepted:
+            return
+
+        project_name = project_name.strip()
+
+        if not project_name:
+            project_name = "Untitled Project"
+
+        self.project = Project(
+            name=project_name
+        )
+
+        self.project_file_path = None
+
+        self.driver_explorer.set_project(
+            self.project
+        )
+
+        self.update_window_title()
+
+    def open_project(self) -> None:
+        """Open an existing OpenAcoustics project."""
+        file_path, _selected_filter = (
+            QFileDialog.getOpenFileName(
+                self,
+                "Open OpenAcoustics Project",
+                "",
+                (
+                    "OpenAcoustics projects "
+                    "(*.oa-project);;"
+                    "All files (*.*)"
+                ),
+            )
+        )
+
+        if not file_path:
+            return
+
+        try:
+            project = Project.load(file_path)
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Could not open project",
+                str(error),
+            )
+            return
+
+        self.project = project
+        self.project_file_path = file_path
+
+        self.driver_explorer.set_project(
+            self.project
+        )
+
+        self.update_window_title()
+
+    def save_project(self) -> None:
+        """Save the current project."""
+        if self.project_file_path is None:
+            self.save_project_as()
+            return
+
+        try:
+            self.project.save(
+                self.project_file_path
+            )
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Could not save project",
+                str(error),
+            )
+            return
+
+        self.update_window_title()
+
+    def save_project_as(self) -> None:
+        """Save the current project to a selected file."""
+        suggested_name = (
+            f"{self.project.name}.oa-project"
+        )
+
+        file_path, _selected_filter = (
+            QFileDialog.getSaveFileName(
+                self,
+                "Save OpenAcoustics Project",
+                suggested_name,
+                (
+                    "OpenAcoustics projects "
+                    "(*.oa-project);;"
+                    "All files (*.*)"
+                ),
+            )
+        )
+
+        if not file_path:
+            return
+
+        if not file_path.lower().endswith(
+            ".oa-project"
+        ):
+            file_path += ".oa-project"
+
+        try:
+            self.project.save(file_path)
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Could not save project",
+                str(error),
+            )
+            return
+
+        self.project_file_path = file_path
+
+        self.update_window_title()
 
     def open_add_driver_dialog(self) -> None:
         """Open the manual driver-entry dialog."""
@@ -65,7 +262,17 @@ class MainWindow(QMainWindow):
             return
 
         driver = dialog.get_driver()
-        self.database.add_driver(driver)
+
+        try:
+            self.database.add_driver(driver)
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Could not add driver",
+                str(error),
+            )
+            return
 
         self.refresh_driver_explorer()
 
@@ -80,11 +287,13 @@ class MainWindow(QMainWindow):
 
     def import_drivers_from_csv(self) -> None:
         """Select a CSV file and import its drivers."""
-        file_path, _selected_filter = QFileDialog.getOpenFileName(
-            self,
-            "Import Driver CSV",
-            "",
-            "CSV files (*.csv);;All files (*.*)",
+        file_path, _selected_filter = (
+            QFileDialog.getOpenFileName(
+                self,
+                "Import Driver CSV",
+                "",
+                "CSV files (*.csv);;All files (*.*)",
+            )
         )
 
         if not file_path:
@@ -123,7 +332,9 @@ class MainWindow(QMainWindow):
             )
 
             if len(result.errors) > 10:
-                remaining = len(result.errors) - 10
+                remaining = (
+                    len(result.errors) - 10
+                )
 
                 message += (
                     f"\n...and {remaining} more errors."
@@ -139,7 +350,34 @@ class MainWindow(QMainWindow):
         """Reload the Driver Explorer after database changes."""
         self.driver_explorer.reload_drivers()
 
-        self.driver_explorer = DriverExplorer()
-        self.setCentralWidget(self.driver_explorer)
+    def update_window_title(self) -> None:
+        """Update the main application window title."""
+        self.setWindowTitle(
+            f"{self.project.name} — OpenAcoustics"
+        )
 
-        old_widget.deleteLater()
+    def closeEvent(self, event) -> None:
+        """Ask whether the user wants to save before closing."""
+        response = QMessageBox.question(
+            self,
+            "Close OpenAcoustics",
+            "Save the current project before closing?",
+            (
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+                | QMessageBox.StandardButton.Cancel
+            ),
+        )
+
+        if response == QMessageBox.StandardButton.Cancel:
+            event.ignore()
+            return
+
+        if response == QMessageBox.StandardButton.Yes:
+            self.save_project()
+
+            if self.project_file_path is None:
+                event.ignore()
+                return
+
+        event.accept()
