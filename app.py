@@ -1,13 +1,31 @@
-from acoustics.driver import Driver
-from plots.sealed_box_plot import plot_volume_slider
+from acoustics.driver_database import DriverDatabase
+from core.project import Project
 
 
-driver = Driver.load("examples/SB17NBAC35-8.json")
+database = DriverDatabase()
+drivers = database.load_all()
 
-plot_volume_slider(
-    driver=driver,
-    initial_volume_l=10.0,
-    minimum_volume_l=2.0,
-    maximum_volume_l=40.0,
-    volume_step_l=0.1,
+project = Project(
+    name="Studio Monitor Concept",
 )
+
+if drivers:
+    project.set_driver(drivers[0])
+
+project.set_sealed_box(
+    volume_l=10.0,
+)
+
+project.notes = (
+    "Initial sealed-box concept for evaluation."
+)
+
+project.save(
+    "projects/studio_monitor.oa-project"
+)
+
+loaded_project = Project.load(
+    "projects/studio_monitor.oa-project"
+)
+
+loaded_project.summary()

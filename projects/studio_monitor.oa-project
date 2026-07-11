@@ -1,0 +1,25 @@
+{
+    "name": "Studio Monitor Concept",
+    "driver": {
+        "manufacturer": "Example Audio",
+        "model": "Sub250-4",
+        "fs": 27.0,
+        "qts": 0.41,
+        "qes": 0.45,
+        "qms": 5.1,
+        "vas": 95.0,
+        "re": 3.4,
+        "le": 1.2,
+        "sd": 330.0,
+        "xmax": 12.0,
+        "bl": 12.5,
+        "mms": 85.0,
+        "cms": 0.42
+    },
+    "enclosure_type": "sealed",
+    "enclosure_parameters": {
+        "volume_l": 10.0
+    },
+    "notes": "Initial sealed-box concept for evaluation.",
+    "format_version": 1
+}
