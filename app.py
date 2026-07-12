@@ -1,30 +1,79 @@
-from acoustics.bass_reflex_port import (
-    BassReflexPortCalculator,
-)
+import matplotlib.pyplot as plt
+import numpy as np
+
+from acoustics.bass_reflex import BassReflex
+from acoustics.driver_database import DriverDatabase
 from core.enclosures.bass_reflex import (
     BassReflexEnclosure,
 )
 
 
+database = DriverDatabase()
+drivers = database.load_all()
+
+if not drivers:
+    raise RuntimeError(
+        "No drivers exist in the database."
+    )
+
+driver = drivers[0]
+
 enclosure = BassReflexEnclosure(
     volume_l=20.0,
     tuning_hz=38.0,
     port_diameter_mm=68.0,
-    port_count=1,
 )
 
-calculator = BassReflexPortCalculator()
-
-result = calculator.calculate_required_length(
-    enclosure
+simulation = BassReflex(
+    driver=driver,
+    enclosure=enclosure,
 )
 
-print("=" * 50)
-print("Bass-reflex port calculation")
-print("=" * 50)
-print(f"Tuning              : {result.tuning_hz:.2f} Hz")
-print(f"Port count          : {result.port_count}")
-print(f"Single-port area    : {result.single_port_area_cm2:.2f} cm²")
-print(f"Total port area     : {result.total_port_area_cm2:.2f} cm²")
-print(f"Effective length    : {result.effective_length_mm:.2f} mm")
-print(f"Physical length     : {result.physical_length_mm:.2f} mm")
+simulation.calculate()
+simulation.summary()
+
+frequencies_hz = np.logspace(
+    np.log10(10.0),
+    np.log10(1000.0),
+    1000,
+)
+
+magnitude_db = (
+    simulation.calculate_transfer_function(
+        frequencies_hz
+    )
+)
+
+plt.semilogx(
+    frequencies_hz,
+    magnitude_db,
+)
+
+plt.axhline(
+    0.0,
+    linestyle=":",
+)
+
+plt.axhline(
+    -3.0,
+    linestyle="--",
+)
+
+plt.axvline(
+    enclosure.tuning_hz,
+    linestyle=":",
+    label=f"Fb = {enclosure.tuning_hz:.1f} Hz",
+)
+
+plt.xlabel("Frequency (Hz)")
+plt.ylabel("Transfer function magnitude (dB)")
+plt.title(
+    f"{driver.manufacturer} {driver.model}\n"
+    "Bass-reflex transfer function"
+)
+plt.xlim(10.0, 1000.0)
+plt.ylim(-40.0, 10.0)
+plt.grid(True, which="both")
+plt.legend()
+plt.tight_layout()
+plt.show()
