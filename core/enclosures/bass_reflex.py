@@ -9,10 +9,8 @@ class BassReflexEnclosure(Enclosure):
 
     volume_l: float
     tuning_hz: float
-
     port_diameter_mm: float
     port_count: int = 1
-
     port_length_mm: float | None = None
 
     def __post_init__(self) -> None:

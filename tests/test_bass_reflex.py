@@ -87,3 +87,62 @@ def test_missing_vas_is_rejected() -> None:
             driver=driver,
             enclosure=create_test_enclosure(),
         )
+def test_transfer_function_is_finite() -> None:
+    simulation = BassReflex(
+        driver=create_test_driver(),
+        enclosure=create_test_enclosure(),
+    )
+
+    simulation.calculate()
+
+    frequencies_hz = np.logspace(
+        np.log10(5.0),
+        np.log10(10_000.0),
+        2000,
+    )
+
+    magnitude_db = simulation.calculate_transfer_function(
+        frequencies_hz
+    )
+
+    assert np.all(np.isfinite(magnitude_db))
+
+
+def test_low_frequency_rolloff_is_approximately_24_db_per_octave() -> None:
+    simulation = BassReflex(
+        driver=create_test_driver(),
+        enclosure=create_test_enclosure(),
+    )
+
+    simulation.calculate()
+
+    magnitude_db = simulation.calculate_transfer_function(
+        np.array([2.0, 4.0])
+    )
+
+    change_db = magnitude_db[1] - magnitude_db[0]
+
+    assert math.isclose(
+        change_db,
+        24.0,
+        abs_tol=1.0,
+    )
+
+
+def test_calculated_f3_is_at_minus_three_db() -> None:
+    simulation = BassReflex(
+        driver=create_test_driver(),
+        enclosure=create_test_enclosure(),
+    )
+
+    simulation.calculate()
+
+    response_db = simulation.calculate_transfer_function(
+        np.array([simulation.f3_hz])
+    )
+
+    assert math.isclose(
+        response_db[0],
+        -3.0103,
+        abs_tol=0.02,
+    )
