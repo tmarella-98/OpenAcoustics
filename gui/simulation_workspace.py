@@ -19,6 +19,7 @@ from core.enclosures.bass_reflex import BassReflexEnclosure
 from core.enclosures.sealed import SealedEnclosure
 from core.project import Project
 from gui.mpl_canvas import MplCanvas
+from acoustics.bass_reflex_port import BassReflexPortCalculator
 
 
 class SimulationWorkspace(QWidget):
@@ -106,6 +107,7 @@ class SimulationWorkspace(QWidget):
             height=5.0,
             dpi=100,
         )
+        self.port_length_label = QLabel("Port length: N/A")
 
     def create_layout(self) -> None:
         """Create the workspace layout."""
@@ -165,6 +167,9 @@ class SimulationWorkspace(QWidget):
 
         results_group.setLayout(
             results_form
+        )
+        results_form.addRow(
+            self.port_length_label
         )
 
         layout = QVBoxLayout()
@@ -416,7 +421,9 @@ class SimulationWorkspace(QWidget):
     def run_sealed_simulation(self) -> None:
         """Run and display a sealed-box simulation."""
         volume_l = self.volume_spinbox.value()
-
+        self.port_length_label.setText(
+    "Port length: N/A"
+)
         enclosure = SealedEnclosure(
             volume_l=volume_l
         )
@@ -530,7 +537,16 @@ class SimulationWorkspace(QWidget):
         self.project.set_enclosure(
             enclosure
         )
+        port_calculator = BassReflexPortCalculator()
 
+        port_result = port_calculator.calculate_required_length(
+    enclosure
+)
+
+        self.port_length_label.setText(
+    f"Port length: "
+    f"{port_result.physical_length_mm:.1f} mm"
+)
         simulation = BassReflex(
             driver=self.project.driver,
             enclosure=enclosure,
@@ -650,7 +666,9 @@ class SimulationWorkspace(QWidget):
         self.driver_label.setText(
             "Driver: None"
         )
-
+        self.port_length_label.setText(
+    "Port length: N/A"
+)
         self.fc_label.setText(
             "Fc: N/A"
         )
@@ -710,7 +728,9 @@ class SimulationWorkspace(QWidget):
         self.status_label.setText(
             f"Simulation unavailable: {message}"
         )
-
+        self.port_length_label.setText(
+    "Port length: N/A"
+)
         axes = self.canvas.axes
         axes.clear()
         axes.set_title(
