@@ -7,23 +7,25 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QLabel,
-    QMessageBox,
     QSlider,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from acoustics.bass_reflex import BassReflex
+from acoustics.bass_reflex_port import BassReflexPortCalculator
+from acoustics.driver_model import DriverModel
+from acoustics.impedance import ImpedanceCalculator
 from acoustics.sealed_box import SealedBox
 from core.enclosures.bass_reflex import BassReflexEnclosure
 from core.enclosures.sealed import SealedEnclosure
 from core.project import Project
 from gui.mpl_canvas import MplCanvas
-from acoustics.bass_reflex_port import BassReflexPortCalculator
 
 
 class SimulationWorkspace(QWidget):
-    """Workspace for enclosure controls, simulation results and plots."""
+    """Workspace containing enclosure controls, results and plots."""
 
     def __init__(
         self,
@@ -33,14 +35,19 @@ class SimulationWorkspace(QWidget):
         super().__init__(parent)
 
         self.project = project
+        self._updating_controls = False
 
-        self.frequencies_hz = np.logspace(
+        self.response_frequencies_hz = np.logspace(
             np.log10(10.0),
             np.log10(1000.0),
             1200,
         )
 
-        self._updating_controls = False
+        self.impedance_frequencies_hz = np.logspace(
+            np.log10(5.0),
+            np.log10(20_000.0),
+            2000,
+        )
 
         self.create_widgets()
         self.create_layout()
@@ -48,7 +55,7 @@ class SimulationWorkspace(QWidget):
         self.set_project(project)
 
     def create_widgets(self) -> None:
-        """Create workspace controls and result widgets."""
+        """Create all workspace controls, labels and plot tabs."""
         self.simulation_type_selector = QComboBox()
         self.simulation_type_selector.addItem(
             "Sealed Box",
@@ -67,11 +74,12 @@ class SimulationWorkspace(QWidget):
         self.volume_spinbox.setValue(10.0)
         self.volume_spinbox.setKeyboardTracking(False)
 
+        # The slider uses tenths of a litre:
+        # 1 means 0.1 L and 10,000 means 1000 L.
         self.volume_slider = QSlider(
             Qt.Orientation.Horizontal
         )
-        self.volume_slider.setMinimum(1)
-        self.volume_slider.setMaximum(1000)
+        self.volume_slider.setRange(1, 10_000)
         self.volume_slider.setValue(100)
         self.volume_slider.setSingleStep(1)
 
@@ -96,91 +104,139 @@ class SimulationWorkspace(QWidget):
         self.qtc_label = QLabel("Qtc: N/A")
         self.f3_label = QLabel("F3: N/A")
         self.fb_label = QLabel("Fb: N/A")
+        self.port_length_label = QLabel("Port length: N/A")
+
+        self.re_label = QLabel("Re: N/A")
+        self.fs_label = QLabel("Fs: N/A")
+        self.peak_impedance_label = QLabel(
+            "Peak impedance: N/A"
+        )
 
         self.status_label = QLabel(
             "Select a driver to begin."
         )
         self.status_label.setWordWrap(True)
 
-        self.canvas = MplCanvas(
+        self.plot_tabs = QTabWidget()
+
+        self.response_canvas = MplCanvas(
             width=8.0,
             height=5.0,
             dpi=100,
         )
-        self.port_length_label = QLabel("Port length: N/A")
+
+        self.impedance_canvas = MplCanvas(
+            width=8.0,
+            height=5.0,
+            dpi=100,
+        )
+
+        self.excursion_placeholder = QLabel(
+            "Cone excursion coming soon"
+        )
+        self.excursion_placeholder.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        self.port_velocity_placeholder = QLabel(
+            "Port velocity coming soon"
+        )
+        self.port_velocity_placeholder.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        self.plot_tabs.addTab(
+            self.response_canvas,
+            "Frequency Response",
+        )
+
+        self.plot_tabs.addTab(
+            self.impedance_canvas,
+            "Impedance",
+        )
+
+        self.plot_tabs.addTab(
+            self.excursion_placeholder,
+            "Excursion",
+        )
+
+        self.plot_tabs.addTab(
+            self.port_velocity_placeholder,
+            "Port Velocity",
+        )
 
     def create_layout(self) -> None:
-        """Create the workspace layout."""
-        simulation_group = QGroupBox(
+        """Create and assign the workspace layout."""
+        self.simulation_group = QGroupBox(
             "Simulation"
         )
-        simulation_form = QFormLayout()
 
-        simulation_form.addRow(
+        self.simulation_form = QFormLayout()
+
+        self.simulation_form.addRow(
             "Type",
             self.simulation_type_selector,
         )
-        simulation_form.addRow(
+
+        self.simulation_form.addRow(
             "Box volume",
             self.volume_spinbox,
         )
-        simulation_form.addRow(
+
+        self.simulation_form.addRow(
             "",
             self.volume_slider,
         )
-        simulation_form.addRow(
+
+        self.simulation_form.addRow(
             "Tuning frequency",
             self.tuning_spinbox,
         )
-        simulation_form.addRow(
+
+        self.simulation_form.addRow(
             "Port diameter",
             self.port_diameter_spinbox,
         )
 
-        simulation_group.setLayout(
-            simulation_form
+        self.simulation_group.setLayout(
+            self.simulation_form
         )
 
         results_group = QGroupBox(
             "Results"
         )
+
         results_form = QFormLayout()
 
+        results_form.addRow(self.driver_label)
+        results_form.addRow(self.fc_label)
+        results_form.addRow(self.qtc_label)
+        results_form.addRow(self.f3_label)
+        results_form.addRow(self.fb_label)
+        results_form.addRow(self.port_length_label)
+        results_form.addRow(self.fs_label)
+        results_form.addRow(self.re_label)
         results_form.addRow(
-            self.driver_label
+            self.peak_impedance_label
         )
-        results_form.addRow(
-            self.fc_label
-        )
-        results_form.addRow(
-            self.qtc_label
-        )
-        results_form.addRow(
-            self.f3_label
-        )
-        results_form.addRow(
-            self.fb_label
-        )
-        results_form.addRow(
-            self.status_label
-        )
+        results_form.addRow(self.status_label)
 
         results_group.setLayout(
             results_form
         )
-        results_form.addRow(
-            self.port_length_label
-        )
 
         layout = QVBoxLayout()
-        layout.addWidget(simulation_group)
+        layout.addWidget(self.simulation_group)
         layout.addWidget(results_group)
-        layout.addWidget(self.canvas, stretch=1)
+        layout.addWidget(
+            self.plot_tabs,
+            stretch=1,
+        )
 
         self.setLayout(layout)
 
     def connect_signals(self) -> None:
-        """Connect controls to simulation updates."""
+        """Connect control changes to simulation updates."""
         self.simulation_type_selector.currentIndexChanged.connect(
             self.on_simulation_type_changed
         )
@@ -211,7 +267,7 @@ class SimulationWorkspace(QWidget):
         self.update_simulation()
 
     def load_controls_from_project(self) -> None:
-        """Load enclosure settings from the active project."""
+        """Load enclosure controls from the current project."""
         self._updating_controls = True
 
         try:
@@ -221,11 +277,16 @@ class SimulationWorkspace(QWidget):
                 enclosure,
                 SealedEnclosure,
             ):
-                self.simulation_type_selector.setCurrentIndex(
+                sealed_index = (
                     self.simulation_type_selector.findData(
                         "sealed"
                     )
                 )
+
+                self.simulation_type_selector.setCurrentIndex(
+                    sealed_index
+                )
+
                 self.set_volume_value(
                     enclosure.volume_l
                 )
@@ -234,27 +295,39 @@ class SimulationWorkspace(QWidget):
                 enclosure,
                 BassReflexEnclosure,
             ):
-                self.simulation_type_selector.setCurrentIndex(
+                bass_reflex_index = (
                     self.simulation_type_selector.findData(
                         "bass_reflex"
                     )
                 )
+
+                self.simulation_type_selector.setCurrentIndex(
+                    bass_reflex_index
+                )
+
                 self.set_volume_value(
                     enclosure.volume_l
                 )
+
                 self.tuning_spinbox.setValue(
                     enclosure.tuning_hz
                 )
+
                 self.port_diameter_spinbox.setValue(
                     enclosure.port_diameter_mm
                 )
 
             else:
-                self.simulation_type_selector.setCurrentIndex(
+                sealed_index = (
                     self.simulation_type_selector.findData(
                         "sealed"
                     )
                 )
+
+                self.simulation_type_selector.setCurrentIndex(
+                    sealed_index
+                )
+
                 self.set_volume_value(10.0)
 
         finally:
@@ -263,7 +336,7 @@ class SimulationWorkspace(QWidget):
         self.update_control_visibility()
 
     def update_control_visibility(self) -> None:
-        """Show controls relevant to the selected simulation type."""
+        """Show only controls relevant to the enclosure type."""
         simulation_type = (
             self.simulation_type_selector.currentData()
         )
@@ -275,40 +348,38 @@ class SimulationWorkspace(QWidget):
         self.tuning_spinbox.setVisible(
             is_bass_reflex
         )
+
         self.port_diameter_spinbox.setVisible(
             is_bass_reflex
         )
 
-        form_layout = (
-            self.tuning_spinbox.parentWidget().layout()
-        )
-
-        if isinstance(
-            form_layout,
-            QFormLayout,
-        ):
-            tuning_label = form_layout.labelForField(
+        tuning_label = (
+            self.simulation_form.labelForField(
                 self.tuning_spinbox
             )
-            port_label = form_layout.labelForField(
+        )
+
+        port_label = (
+            self.simulation_form.labelForField(
                 self.port_diameter_spinbox
             )
+        )
 
-            if tuning_label is not None:
-                tuning_label.setVisible(
-                    is_bass_reflex
-                )
+        if tuning_label is not None:
+            tuning_label.setVisible(
+                is_bass_reflex
+            )
 
-            if port_label is not None:
-                port_label.setVisible(
-                    is_bass_reflex
-                )
+        if port_label is not None:
+            port_label.setVisible(
+                is_bass_reflex
+            )
 
     def on_simulation_type_changed(
         self,
         *_args,
     ) -> None:
-        """Handle a change in enclosure type."""
+        """Handle an enclosure-type selection change."""
         if self._updating_controls:
             return
 
@@ -319,7 +390,7 @@ class SimulationWorkspace(QWidget):
         self,
         volume_l: float,
     ) -> None:
-        """Keep the slider synchronized with the spinbox."""
+        """Synchronize the volume slider with the spinbox."""
         if self._updating_controls:
             return
 
@@ -329,6 +400,7 @@ class SimulationWorkspace(QWidget):
             slider_value = int(
                 round(volume_l * 10.0)
             )
+
             self.volume_slider.setValue(
                 slider_value
             )
@@ -342,7 +414,7 @@ class SimulationWorkspace(QWidget):
         self,
         slider_value: int,
     ) -> None:
-        """Keep the spinbox synchronized with the slider."""
+        """Synchronize the volume spinbox with the slider."""
         if self._updating_controls:
             return
 
@@ -364,24 +436,20 @@ class SimulationWorkspace(QWidget):
         self,
         volume_l: float,
     ) -> None:
-        """Set volume controls without causing duplicate updates."""
+        """Set both volume controls."""
         self.volume_spinbox.setValue(
             volume_l
         )
 
-        slider_value = int(
-            round(volume_l * 10.0)
-        )
-
         self.volume_slider.setValue(
-            slider_value
+            int(round(volume_l * 10.0))
         )
 
     def update_simulation(
         self,
         *_args,
     ) -> None:
-        """Update the project, calculate the model and redraw the plot."""
+        """Recalculate all available analyses and redraw plots."""
         if self._updating_controls:
             return
 
@@ -389,6 +457,7 @@ class SimulationWorkspace(QWidget):
 
         if driver is None:
             self.show_no_driver_state()
+            self.update_impedance_plot()
             return
 
         self.driver_label.setText(
@@ -418,12 +487,19 @@ class SimulationWorkspace(QWidget):
                 str(error)
             )
 
+        # This is currently free-air impedance, so it depends on the
+        # selected driver but not yet on the selected enclosure.
+        self.update_impedance_plot()
+
     def run_sealed_simulation(self) -> None:
-        """Run and display a sealed-box simulation."""
+        """Run and display the sealed-box response."""
+        driver = self.project.driver
+
+        if driver is None:
+            return
+
         volume_l = self.volume_spinbox.value()
-        self.port_length_label.setText(
-    "Port length: N/A"
-)
+
         enclosure = SealedEnclosure(
             volume_l=volume_l
         )
@@ -433,7 +509,7 @@ class SimulationWorkspace(QWidget):
         )
 
         simulation = SealedBox(
-            driver=self.project.driver,
+            driver=driver,
             volume_l=volume_l,
         )
 
@@ -441,7 +517,7 @@ class SimulationWorkspace(QWidget):
 
         magnitude_db = (
             simulation.calculate_transfer_function(
-                self.frequencies_hz
+                self.response_frequencies_hz
             )
         )
 
@@ -461,19 +537,22 @@ class SimulationWorkspace(QWidget):
             "Fb: N/A"
         )
 
+        self.port_length_label.setText(
+            "Port length: N/A"
+        )
+
         self.status_label.setText(
             "Sealed-box simulation calculated successfully."
         )
 
-        axes = self.canvas.axes
+        axes = self.response_canvas.axes
         axes.clear()
 
         axes.semilogx(
-            self.frequencies_hz,
+            self.response_frequencies_hz,
             magnitude_db,
             label=(
-                f"Sealed — "
-                f"{volume_l:.1f} L"
+                f"Sealed — {volume_l:.1f} L"
             ),
         )
 
@@ -493,26 +572,20 @@ class SimulationWorkspace(QWidget):
             simulation.fc_hz,
             linestyle=":",
             linewidth=1,
-            label=(
-                f"Fc = "
-                f"{simulation.fc_hz:.1f} Hz"
-            ),
+            label=f"Fc = {simulation.fc_hz:.1f} Hz",
         )
 
         axes.axvline(
             simulation.f3_hz,
             linestyle="--",
             linewidth=1,
-            label=(
-                f"F3 = "
-                f"{simulation.f3_hz:.1f} Hz"
-            ),
+            label=f"F3 = {simulation.f3_hz:.1f} Hz",
         )
 
-        self.finish_plot(
+        self.finish_response_plot(
             title=(
-                f"{self.project.driver.manufacturer} "
-                f"{self.project.driver.model}\n"
+                f"{driver.manufacturer} "
+                f"{driver.model}\n"
                 "Sealed-box transfer function"
             ),
             y_min=-30.0,
@@ -520,9 +593,15 @@ class SimulationWorkspace(QWidget):
         )
 
     def run_bass_reflex_simulation(self) -> None:
-        """Run and display a bass-reflex simulation."""
+        """Run and display the bass-reflex response."""
+        driver = self.project.driver
+
+        if driver is None:
+            return
+
         volume_l = self.volume_spinbox.value()
         tuning_hz = self.tuning_spinbox.value()
+
         port_diameter_mm = (
             self.port_diameter_spinbox.value()
         )
@@ -537,18 +616,9 @@ class SimulationWorkspace(QWidget):
         self.project.set_enclosure(
             enclosure
         )
-        port_calculator = BassReflexPortCalculator()
 
-        port_result = port_calculator.calculate_required_length(
-    enclosure
-)
-
-        self.port_length_label.setText(
-    f"Port length: "
-    f"{port_result.physical_length_mm:.1f} mm"
-)
         simulation = BassReflex(
-            driver=self.project.driver,
+            driver=driver,
             enclosure=enclosure,
         )
 
@@ -556,7 +626,17 @@ class SimulationWorkspace(QWidget):
 
         magnitude_db = (
             simulation.calculate_transfer_function(
-                self.frequencies_hz
+                self.response_frequencies_hz
+            )
+        )
+
+        port_calculator = (
+            BassReflexPortCalculator()
+        )
+
+        port_result = (
+            port_calculator.calculate_required_length(
+                enclosure
             )
         )
 
@@ -576,19 +656,23 @@ class SimulationWorkspace(QWidget):
             f"Fb: {tuning_hz:.2f} Hz"
         )
 
+        self.port_length_label.setText(
+            "Port length: "
+            f"{port_result.physical_length_mm:.1f} mm"
+        )
+
         self.status_label.setText(
             "Bass-reflex simulation calculated successfully."
         )
 
-        axes = self.canvas.axes
+        axes = self.response_canvas.axes
         axes.clear()
 
         axes.semilogx(
-            self.frequencies_hz,
+            self.response_frequencies_hz,
             magnitude_db,
             label=(
-                f"Bass reflex — "
-                f"{volume_l:.1f} L, "
+                f"Bass reflex — {volume_l:.1f} L, "
                 f"Fb {tuning_hz:.1f} Hz"
             ),
         )
@@ -616,30 +700,177 @@ class SimulationWorkspace(QWidget):
             simulation.f3_hz,
             linestyle="--",
             linewidth=1,
-            label=(
-                f"F3 = "
-                f"{simulation.f3_hz:.1f} Hz"
-            ),
+            label=f"F3 = {simulation.f3_hz:.1f} Hz",
         )
 
-        self.finish_plot(
+        self.finish_response_plot(
             title=(
-                f"{self.project.driver.manufacturer} "
-                f"{self.project.driver.model}\n"
+                f"{driver.manufacturer} "
+                f"{driver.model}\n"
                 "Bass-reflex transfer function"
             ),
             y_min=-40.0,
             y_max=10.0,
         )
 
-    def finish_plot(
+    def update_impedance_plot(self) -> None:
+        """Calculate and plot free-air electrical impedance."""
+        driver = self.project.driver
+
+        axes = self.impedance_canvas.axes
+        axes.clear()
+
+        if driver is None:
+            self.re_label.setText(
+                "Re: N/A"
+            )
+
+            self.fs_label.setText(
+                "Fs: N/A"
+            )
+
+            self.peak_impedance_label.setText(
+                "Peak impedance: N/A"
+            )
+
+            axes.set_title(
+                "No driver selected"
+            )
+
+            axes.set_xlabel(
+                "Frequency (Hz)"
+            )
+
+            axes.set_ylabel(
+                "Impedance magnitude (Ω)"
+            )
+
+            axes.set_xscale("log")
+            axes.grid(
+                True,
+                which="both",
+            )
+
+            self.impedance_canvas.draw_idle()
+            return
+
+        try:
+            model = DriverModel(driver)
+
+            calculator = ImpedanceCalculator(
+                model
+            )
+
+            result = calculator.calculate(
+                self.impedance_frequencies_hz
+            )
+
+        except Exception as error:
+            self.re_label.setText(
+                "Re: N/A"
+            )
+
+            self.fs_label.setText(
+                "Fs: N/A"
+            )
+
+            self.peak_impedance_label.setText(
+                "Peak impedance: N/A"
+            )
+
+            axes.set_title(
+                "Impedance unavailable"
+            )
+
+            axes.text(
+                0.5,
+                0.5,
+                str(error),
+                horizontalalignment="center",
+                verticalalignment="center",
+                transform=axes.transAxes,
+                wrap=True,
+            )
+
+            self.impedance_canvas.draw_idle()
+            return
+
+        peak_index = int(
+            np.argmax(result.magnitude_ohm)
+        )
+
+        peak_impedance_ohm = float(
+            result.magnitude_ohm[peak_index]
+        )
+
+        peak_frequency_hz = float(
+            result.frequency_hz[peak_index]
+        )
+
+        self.re_label.setText(
+            f"Re: {model.re:.2f} Ω"
+        )
+
+        self.fs_label.setText(
+            f"Fs: {model.fs:.2f} Hz"
+        )
+
+        self.peak_impedance_label.setText(
+            "Peak impedance: "
+            f"{peak_impedance_ohm:.2f} Ω "
+            f"at {peak_frequency_hz:.1f} Hz"
+        )
+
+        axes.semilogx(
+            result.frequency_hz,
+            result.magnitude_ohm,
+            label="Free-air impedance",
+        )
+
+        axes.axvline(
+            model.fs,
+            linestyle="--",
+            linewidth=1,
+            label=f"Fs = {model.fs:.1f} Hz",
+        )
+
+        axes.set_xlabel(
+            "Frequency (Hz)"
+        )
+
+        axes.set_ylabel(
+            "Impedance magnitude (Ω)"
+        )
+
+        axes.set_title(
+            f"{driver.manufacturer} "
+            f"{driver.model}\n"
+            "Free-air electrical impedance"
+        )
+
+        axes.set_xlim(
+            self.impedance_frequencies_hz[0],
+            self.impedance_frequencies_hz[-1],
+        )
+
+        axes.grid(
+            True,
+            which="both",
+        )
+
+        axes.legend()
+
+        self.impedance_canvas.figure.tight_layout()
+        self.impedance_canvas.draw_idle()
+
+    def finish_response_plot(
         self,
         title: str,
         y_min: float,
         y_max: float,
     ) -> None:
-        """Apply common plot formatting and redraw the canvas."""
-        axes = self.canvas.axes
+        """Apply common formatting to the response plot."""
+        axes = self.response_canvas.axes
 
         axes.set_xlabel(
             "Frequency (Hz)"
@@ -650,25 +881,33 @@ class SimulationWorkspace(QWidget):
         )
 
         axes.set_title(title)
-        axes.set_xlim(10.0, 1000.0)
-        axes.set_ylim(y_min, y_max)
+
+        axes.set_xlim(
+            self.response_frequencies_hz[0],
+            self.response_frequencies_hz[-1],
+        )
+
+        axes.set_ylim(
+            y_min,
+            y_max,
+        )
+
         axes.grid(
             True,
             which="both",
         )
+
         axes.legend()
 
-        self.canvas.figure.tight_layout()
-        self.canvas.draw_idle()
+        self.response_canvas.figure.tight_layout()
+        self.response_canvas.draw_idle()
 
     def show_no_driver_state(self) -> None:
-        """Display an empty state when the project has no driver."""
+        """Display empty plots and labels when no driver is selected."""
         self.driver_label.setText(
             "Driver: None"
         )
-        self.port_length_label.setText(
-    "Port length: N/A"
-)
+
         self.fc_label.setText(
             "Fc: N/A"
         )
@@ -683,59 +922,76 @@ class SimulationWorkspace(QWidget):
 
         self.fb_label.setText(
             "Fb: N/A"
+        )
+
+        self.port_length_label.setText(
+            "Port length: N/A"
         )
 
         self.status_label.setText(
             "Select a driver in the Driver Explorer."
         )
 
-        axes = self.canvas.axes
+        axes = self.response_canvas.axes
         axes.clear()
+
         axes.set_title(
             "No driver selected"
         )
+
         axes.set_xlabel(
             "Frequency (Hz)"
         )
+
         axes.set_ylabel(
             "Transfer function magnitude (dB)"
         )
+
+        axes.set_xscale("log")
+
         axes.grid(
             True,
             which="both",
         )
 
-        self.canvas.draw_idle()
+        self.response_canvas.draw_idle()
 
     def show_simulation_error(
         self,
         message: str,
     ) -> None:
-        """Display a simulation error without crashing the application."""
+        """Display a response-simulation error without crashing."""
         self.fc_label.setText(
             "Fc: N/A"
         )
+
         self.qtc_label.setText(
             "Qtc: N/A"
         )
+
         self.f3_label.setText(
             "F3: N/A"
         )
+
         self.fb_label.setText(
             "Fb: N/A"
+        )
+
+        self.port_length_label.setText(
+            "Port length: N/A"
         )
 
         self.status_label.setText(
             f"Simulation unavailable: {message}"
         )
-        self.port_length_label.setText(
-    "Port length: N/A"
-)
-        axes = self.canvas.axes
+
+        axes = self.response_canvas.axes
         axes.clear()
+
         axes.set_title(
             "Simulation unavailable"
         )
+
         axes.text(
             0.5,
             0.5,
@@ -746,4 +1002,4 @@ class SimulationWorkspace(QWidget):
             wrap=True,
         )
 
-        self.canvas.draw_idle()
+        self.response_canvas.draw_idle()

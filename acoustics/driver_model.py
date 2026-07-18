@@ -42,6 +42,14 @@ class DriverModel:
     @property
     def le(self) -> float:
         return self._require(self.driver.le, "Le")
+    @property
+    def le_h(self) -> float:
+        """
+        Voice-coil inductance in henries.
+
+    The database stores Le in millihenries.
+    """
+        return self.le / 1000.0
 
     @property
     def bl(self) -> float:
@@ -125,10 +133,17 @@ class DriverModel:
     def _require(
         value: float | None,
         name: str,
-    ) -> float:
+) -> float:
         if value is None:
             raise ValueError(
                 f"{name} is required."
-            )
+        )
 
-        return float(value)
+        number = float(value)
+
+        if number <= 0:
+         raise ValueError(
+            f"{name} must be greater than zero."
+        )
+
+        return number
